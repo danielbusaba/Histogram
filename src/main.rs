@@ -1,7 +1,39 @@
 use std::collections::HashMap;  //Can be used with bucket to create sublog histograms
 use std::hash::{Hash, Hasher};  //Used for custom bucket hashing
 
-struct Bucket (usize, usize);  //Custom bucket struct to index reuse time (takes in value, sublog bits)
+struct Histogram    //Stores a Histogram
+{
+    sublog_bits: u64,   //Stores sublog bits
+    max_reuse_time: u64,    //Stores largest reuse time for histogram
+    values: Vec <u64>,  //Stores frequency values for histogram
+}
+
+impl Histogram  //Implements methods for the histogram
+{
+    fn new(sb: u64, mrt: u64) -> Histogram  //Constructor that takes in the sublog bits and the maximum reuse time
+    {
+        Histogram {sublog_bits: sb, max_reuse_time: mrt, values: vec!(0; (convert_value_to_index(mrt, sb) + 1) as usize)}   //Creates a histogram with a vector of an appropriate fixed length
+    }
+
+    fn insert(&mut self, reuse_time: u64, frequency: u64)   //Inserts a value into the histogram at a given reuse time
+    {
+        if reuse_time <= self.max_reuse_time    //Makes sure the reuse time is in range
+        {
+            self.values[convert_value_to_index(reuse_time, self.sublog_bits) as usize] = frequency; //Sets bucket value to frequency
+        }
+    }
+
+    fn get(&mut self, reuse_time: u64) -> u64   //Retreives the frequency value at a given reuse time
+    {
+        if reuse_time > self.max_reuse_time //Makes sure reuse time is in range
+        {
+            return 0;
+        }
+        self.values[convert_value_to_index(reuse_time, self.sublog_bits) as usize]  //Returns the frequency in the reuse time's bucket
+    }
+}
+
+struct Bucket (u64, u64);  //Custom bucket struct to index reuse time (takes in value, sublog bits)
 
 impl Hash for Bucket    //Turns raw indexes into bucket indexes
 {
@@ -32,14 +64,14 @@ impl Clone for Bucket //Defines copying for custom bucket
     }
 }
 
-fn convert_value_to_index(value: usize, sublog_bits: usize) -> usize    //Taken from histo.h
+fn convert_value_to_index(value: u64, sublog_bits: u64) -> u64    //Taken from histo.h
 {
     if value < (1 << sublog_bits)   //Ignores values too small to be bucketized
     {
         return value;
     }
 
-    let most_significant_bit = 63 - ((value as u64).leading_zeros() as usize);  //Find's value's most significant bit
+    let most_significant_bit = (63 - value.leading_zeros()) as u64;  //Find's value's most significant bit
     let shift = most_significant_bit - sublog_bits; //Defines shift as difference between most significant bit and sublog bits
     let mut index = value >> shift; //Sets index as value shifted by shift
     index = index & ((1 << sublog_bits) - 1);   //Does a bitwise and with sublog bits number of 1's
@@ -47,7 +79,7 @@ fn convert_value_to_index(value: usize, sublog_bits: usize) -> usize    //Taken 
     index + ((shift + 1) << sublog_bits)    //Adds the shift + 1 shfted by the number of sublogg bits and to the index
 }
 
-// fn convert_index_to_value(index: usize, sublog_bits: usize) -> usize     //Not working yet
+// fn convert_index_to_value(index: u64, sublog_bits: u64) -> u64     //Not working yet
 // {
 //     let shift = index >> sublog_bits;
 //     let temp = index & ((1 << sublog_bits) - 1);
@@ -104,4 +136,18 @@ fn test_hash()  //Demonstrates bucket usage in HashMap
     }
 
     assert_eq!(*histogram.get(&b1).unwrap(), 2);
+}
+
+#[test]
+fn test_histogram() //Tests histogram buckets
+{
+    let mut h1 = Histogram::new(8, 513); //Creates a new histogram for given sublog bits and maximum reuse time
+    h1.insert(512, 2);   //Inserts a value into the same bucket
+    assert_eq!(h1.get(513), 2); //Checks the bucket value
+
+    let mut h2 = Histogram::new(8, 512); //Creates a new histogram for given sublog bits and maximum reuse time
+    h2.insert(512, 1);  //Inserts a value into the same bucket
+    h2.insert(513, 2);  //Although not out of bounds, should be rejected
+    assert_eq!(h2.get(512), 1);
+    assert_eq!(h2.get(513), 0);
 }
